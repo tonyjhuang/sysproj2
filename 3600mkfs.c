@@ -20,6 +20,7 @@
 
 #include "3600fs.h"
 #include "disk.h"
+#include "vcb.h"
 
 void myformat(int size) {
   // Do not touch or move this function
@@ -41,7 +42,15 @@ void myformat(int size) {
     if (dwrite(i, tmp) < 0) 
       perror("Error while writing to disk");
 
+  vcb myvcb;
+  myvcb.blocksize = BLOCKSIZE;
+  char vcbtmp[BLOCKSIZE];
+  memset(vcbtmp, 0, BLOCKSIZE);
+  memcpy(vcbtmp, &myvcb, sizeof(vcb));
+  
+  dwrite(0, vcbtmp);
   // voila! we now have a disk containing all zeros
+  // and a vcb in block 0
 
   // Do not touch or move this function
   dunconnect();

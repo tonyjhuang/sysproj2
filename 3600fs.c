@@ -37,6 +37,7 @@
 
 #include "3600fs.h"
 #include "disk.h"
+#include "vcb.h"
 
 /*
  * Initialize filesystem. Read in file system metadata and initialize
@@ -56,6 +57,12 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
   /* 3600: YOU SHOULD ADD CODE HERE TO CHECK THE CONSISTENCY OF YOUR DISK
            AND LOAD ANY DATA STRUCTURES INTO MEMORY */
 
+  vcb myvcb;
+  char tmp[BLOCKSIZE];
+  memset(tmp, 0, BLOCKSIZE);
+  dread(0, tmp);
+  memcpy(&myvcb, tmp, sizeof(vcb));
+  fprintf(stderr, "vcb.blocksize: %d\n", myvcb.blocksize);
   return NULL;
 }
 
