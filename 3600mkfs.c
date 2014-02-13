@@ -44,6 +44,7 @@ void myformat(int size) {
 
   vcb myvcb;
   myvcb.blocksize = BLOCKSIZE;
+  myvcb.magic     = maaaaagic;
   char vcbtmp[BLOCKSIZE];
   memset(vcbtmp, 0, BLOCKSIZE);
   memcpy(vcbtmp, &myvcb, sizeof(vcb));

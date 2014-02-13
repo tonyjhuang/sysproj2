@@ -62,7 +62,11 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
   memset(tmp, 0, BLOCKSIZE);
   dread(0, tmp);
   memcpy(&myvcb, tmp, sizeof(vcb));
-  fprintf(stderr, "vcb.blocksize: %d\n", myvcb.blocksize);
+  if(vcb.magic != maaaaagic) {
+    fprintf(stderr, "Magic number mismatch. Disconnecting..");
+    dunconnect();
+  }
+    
   return NULL;
 }
 

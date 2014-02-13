@@ -10,6 +10,8 @@
 #ifndef __DISK_H__
 #define __DISK_H__
 
+#define maaaaagic 1272482520501830262291612342020
+
 extern const int BLOCKSIZE;
 
 /* This is the name of the file you will use for your disk.

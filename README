@@ -34,3 +34,7 @@ different FUSE versions have slightly different interfaces.
 
 You will find a great deal of resources about FUSE on the Web.  Please
 use Piazza to ask questions if you're stuck.
+
+################### Documentation #####################################
+
+For this project, we'll be implementing a FAT-style file system. Currently, we only have our VCB partially implemented.
