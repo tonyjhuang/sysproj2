@@ -21,6 +21,10 @@
 #include "3600fs.h"
 #include "disk.h"
 #include "vcb.h"
+#include "dirent.h"
+#include "fatent.h"
+
+void printvcb(vcb myvcb);
 
 void myformat(int size) {
   // Do not touch or move this function
@@ -45,16 +49,32 @@ void myformat(int size) {
   vcb myvcb;
   myvcb.blocksize = BLOCKSIZE;
   myvcb.magic     = maaaaagic;
+  myvcb.de_start  = 1;
+  myvcb.de_length = 100;
+
+  int remaining_size = size - 101;
+  int db_length  = 128 * remaining_size / 129;
+  int fat_length = remaining_size - db_length;
+
+  myvcb.fat_start  = 101;
+  myvcb.fat_length = fat_length;
+  myvcb.db_start   = myvcb.fat_start + myvcb.fat_length;
+
+  printvcb(myvcb);
+
   char vcbtmp[BLOCKSIZE];
   memset(vcbtmp, 0, BLOCKSIZE);
   memcpy(vcbtmp, &myvcb, sizeof(vcb));
   
   dwrite(0, vcbtmp);
-  // voila! we now have a disk containing all zeros
-  // and a vcb in block 0
 
-  // Do not touch or move this function
   dunconnect();
+}
+
+void printvcb(vcb myvcb) {
+  printf("Printing vcb..\nblocksize: %d\nmagic: %d\nde_start: %d\nde_length: %d\nfat_start: %d\nfat_length: %d\ndb_start: %d\n", myvcb.blocksize,
+	 myvcb.magic, myvcb.de_start, myvcb.de_length, 
+	 myvcb.fat_start, myvcb.fat_length, myvcb.db_start);
 }
 
 int main(int argc, char** argv) {
