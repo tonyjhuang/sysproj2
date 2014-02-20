@@ -38,6 +38,8 @@
 #include "3600fs.h"
 #include "disk.h"
 #include "vcb.h"
+#include "dirent.h"
+#include "fatent.h"
 
 /*
  * Initialize filesystem. Read in file system metadata and initialize

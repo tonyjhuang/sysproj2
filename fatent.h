@@ -1,3 +1,4 @@
+// sizeof(fatent) = 4
 typedef struct fatent_s {
   unsigned int used:1; 
   unsigned int eof:1; 

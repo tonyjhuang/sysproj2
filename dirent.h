@@ -1,3 +1,4 @@
+// sizeof(dirent) = 128
 typedef struct dirent_s {
 unsigned int valid;
 unsigned int first_block;
@@ -8,5 +9,5 @@ mode_t mode;
 struct timespec access_time;
 struct timespec modify_time;
 struct timespec create_time;
-char name[28];
+char name[56];
 } dirent;

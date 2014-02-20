@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -25,56 +27,107 @@
 #include "fatent.h"
 
 void printvcb(vcb myvcb);
+vcb *writevcb();
+void writede(vcb *myvcb);
+void writefat(vcb *myvcb);
 
 void myformat(int size) {
   // Do not touch or move this function
   dcreate_connect();
 
-  /* 3600: FILL IN CODE HERE.  YOU SHOULD INITIALIZE ANY ON-DISK
-           STRUCTURES TO THEIR INITIAL VALUE, AS YOU ARE FORMATTING
-           A BLANK DISK.  YOUR DISK SHOULD BE size BLOCKS IN SIZE. */
-
-  /* 3600: AN EXAMPLE OF READING/WRITING TO THE DISK IS BELOW - YOU'LL
-           WANT TO REPLACE THE CODE BELOW WITH SOMETHING MEANINGFUL. */
-
-  // first, create a zero-ed out array of memory  
+  // Write FAT overhead.
+  vcb *myvcb = writevcb(size);
+  writede(myvcb);
+  writefat(myvcb);
+  
+  // Create blank buffer for DataBlocks.
   char *tmp = (char *) malloc(BLOCKSIZE);
   memset(tmp, 0, BLOCKSIZE);
 
-  // now, write that to every block
-  for (int i=0; i<size; i++) 
+  // Write blank buffers to disk.
+  for (int i=myvcb->db_start; i<size; i++) 
     if (dwrite(i, tmp) < 0) 
       perror("Error while writing to disk");
+  free(myvcb);
+  dunconnect();
+}
 
-  vcb myvcb;
-  myvcb.blocksize = BLOCKSIZE;
-  myvcb.magic     = maaaaagic;
-  myvcb.de_start  = 1;
-  myvcb.de_length = 100;
+// Store 128 invalid fatent structs in buffer, write to disk.
+void writefat(vcb *myvcb) {
+  fatent myfatent;
+  myfatent.used = 0;
+  
+  char tmp[BLOCKSIZE];
+  for(int i=0; i<128; i+=4) {
+    memcpy(tmp+i, &myfatent, sizeof(myfatent));
+  } 
+  printf("Writing FAT blocks to disk..\n");
+  for(int i=myvcb->fat_start; i<myvcb->db_start; i++) {
+    dwrite(i, tmp);
+  }
+}
+
+// Write empty DirectoryEntries out to disk.
+// TODO: Optimize so a single dirent doesn't take an entire block.
+void writede(vcb *myvcb) {
+  dirent mydirent;
+  mydirent.valid = 0;
+  char tmp[BLOCKSIZE];
+  memset(tmp, 0, BLOCKSIZE);
+  memcpy(tmp, &mydirent, sizeof(mydirent));
+
+  printf("Writing empty dirent's to disk..\n");
+  for(int i=1; i<myvcb->de_length+1; i++) {
+    dwrite(i, tmp);
+  }
+}
+
+// Write the VCB out to block 0.
+vcb *writevcb(int size) {
+  // Get time.
+  struct timespec now;
+  clock_gettime(CLOCK_REALTIME, &now);
+
+  // Create vcb and write to disk.
+  vcb *myvcb = (vcb *)  malloc(sizeof(vcb));
+  myvcb->blocksize = BLOCKSIZE;
+  myvcb->magic     = maaaaagic;
+  myvcb->de_start  = 1;
+  myvcb->de_length = 100;
 
   int remaining_size = size - 101;
   int db_length  = 128 * remaining_size / 129;
   int fat_length = remaining_size - db_length;
 
-  myvcb.fat_start  = 101;
-  myvcb.fat_length = fat_length;
-  myvcb.db_start   = myvcb.fat_start + myvcb.fat_length;
+  myvcb->fat_start  = 101;
+  myvcb->fat_length = fat_length;
+  myvcb->db_start   = myvcb->fat_start + myvcb->fat_length;
 
-  printvcb(myvcb);
-
-  char vcbtmp[BLOCKSIZE];
-  memset(vcbtmp, 0, BLOCKSIZE);
-  memcpy(vcbtmp, &myvcb, sizeof(vcb));
+  myvcb->user  = getuid();
+  myvcb->group = getgid();
+  //TODO: myvcb->mode = ???;
   
-  dwrite(0, vcbtmp);
+  myvcb->access_time = now;
+  myvcb->modify_time = now;
+  myvcb->create_time = now;
 
-  dunconnect();
+  // Uncomment to debug vcb.
+  //printvcb(*myvcb);
+
+  char tmp[BLOCKSIZE];
+  memset(tmp, 0, BLOCKSIZE);
+  memcpy(tmp, myvcb, sizeof(vcb));
+  
+  printf("Writing vcb to block 0..\n");
+  dwrite(0, tmp);
+  return myvcb;
 }
 
+// Print out vcb to stdout.
 void printvcb(vcb myvcb) {
-  printf("Printing vcb..\nblocksize: %d\nmagic: %d\nde_start: %d\nde_length: %d\nfat_start: %d\nfat_length: %d\ndb_start: %d\n", myvcb.blocksize,
-	 myvcb.magic, myvcb.de_start, myvcb.de_length, 
-	 myvcb.fat_start, myvcb.fat_length, myvcb.db_start);
+  printf("Printing vcb..\nblocksize: %d\nmagic: %d\nde_start: %d\nde_length: %d\nfat_start: %d\nfat_length: %d\ndb_start: %d\nuser id: %d\ngroup id: %d\nmode: %d\n", myvcb.blocksize, myvcb.magic, myvcb.de_start, 
+	 myvcb.de_length, myvcb.fat_start, myvcb.fat_length, 
+	 myvcb.db_start, myvcb.user, myvcb.group, myvcb.mode);
 }
 
 int main(int argc, char** argv) {
