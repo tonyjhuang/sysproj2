@@ -56,11 +56,11 @@ void myformat(int size) {
 void writefat(vcb *myvcb) {
   fatent myfatent;
   myfatent.used = 0;
-  
+
   char tmp[BLOCKSIZE];
-  for(int i=0; i<128; i+=4) {
+  for(int i=0; i<BLOCKSIZE; i+=4) {
     memcpy(tmp+i, &myfatent, sizeof(myfatent));
-  } 
+  }
   printf("Writing FAT blocks to disk..\n");
   for(int i=myvcb->fat_start; i<myvcb->db_start; i++) {
     dwrite(i, tmp);
@@ -103,8 +103,10 @@ vcb *writevcb(int size) {
   myvcb->fat_length = fat_length;
   myvcb->db_start   = myvcb->fat_start + myvcb->fat_length;
 
-  myvcb->user  = getuid();
-  myvcb->group = getgid();
+  myvcb->consistent = 1;
+
+  myvcb->user  = geteuid();
+  myvcb->group = getegid();
   //TODO: myvcb->mode = ???;
   
   myvcb->access_time = now;

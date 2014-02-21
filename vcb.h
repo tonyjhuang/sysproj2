@@ -1,4 +1,3 @@
-
 typedef struct vcb_s {
   // a magic number of identify your disk
   int magic;
@@ -9,6 +8,7 @@ typedef struct vcb_s {
   int fat_start;
   int fat_length;
   int db_start;
+  int consistent;
   // metadata for the root directory
   uid_t user;
   gid_t group;

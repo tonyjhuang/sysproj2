@@ -41,6 +41,12 @@
 #include "dirent.h"
 #include "fatent.h"
 
+// Global vars
+static vcb vcb_g;
+static dirent *dirent_g[100];
+static fatent *fatent_g;
+static int num_of_fatent;
+
 /*
  * Initialize filesystem. Read in file system metadata and initialize
  * memory structures. If there are inconsistencies, now would also be
@@ -56,18 +62,57 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
   // Do not touch or move this code; connects the disk
   dconnect();
 
-  /* 3600: YOU SHOULD ADD CODE HERE TO CHECK THE CONSISTENCY OF YOUR DISK
-           AND LOAD ANY DATA STRUCTURES INTO MEMORY */
-
+  // Read VCB into memory (vcb_g)
   vcb myvcb;
   char tmp[BLOCKSIZE];
   memset(tmp, 0, BLOCKSIZE);
   dread(0, tmp);
   memcpy(&myvcb, tmp, sizeof(vcb));
   if(myvcb.magic != maaaaagic) {
-    fprintf(stderr, "Magic number mismatch. Disconnecting..");
+    perror("Magic number mismatch. Disconnecting..");
     dunconnect();
   }
+  vcb_g = myvcb;
+
+
+  // Read dirent blocks into memory (dirent_g)
+  int dirent_index = 0;
+  for(int i=vcb_g.de_start; i<vcb_g.fat_start; i++) {
+    dirent *mydirent = (dirent *) malloc(sizeof(dirent));
+
+    char tmp[BLOCKSIZE];
+    memset(tmp, 0, BLOCKSIZE);
+    dread(i, tmp);
+    memcpy(mydirent, tmp, sizeof(dirent));
+
+    dirent_g[dirent_index] = mydirent;
+    dirent_index++;
+  }
+
+  // Read fatent blocks into memory (fatent_g)
+  int fatent_index = 0;
+  num_of_fatent = vcb_g.fat_length * 128;
+  fatent_g = (fatent *) malloc(sizeof(fatent) * num_of_fatent);
+  for(int i=vcb_g.fat_start; i<vcb_g.db_start; i++) {
+    fatent local[128];
+
+    char tmp[BLOCKSIZE];
+    memset(tmp, 0, BLOCKSIZE);
+    dread(i, tmp);
+
+    memcpy(local, tmp, BLOCKSIZE);
+    // Read local fatents into fatent_g.
+    for(int j=0; j<128; j++) {
+      fatent *thisfatent = (fatent *) malloc(sizeof(fatent));
+      *thisfatent = local[j];
+      fatent_g[fatent_index+j] = *thisfatent;
+    }
+    fatent_index += 128;
+  }
+
+  if(!vcb_g.consistent)
+    ; //TODO: consistency check/repairs go here
+  
     
   return NULL;
 }
@@ -79,6 +124,7 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
 static void vfs_unmount (void *private_data) {
   fprintf(stderr, "vfs_unmount called\n");
 
+  vcb_g.consistent = 1;
   /* 3600: YOU SHOULD ADD CODE HERE TO MAKE SURE YOUR ON-DISK STRUCTURES
            ARE IN-SYNC BEFORE THE DISK IS UNMOUNTED (ONLY NECESSARY IF YOU
            KEEP DATA CACHED THAT'S NOT ON DISK */
@@ -98,6 +144,7 @@ static void vfs_unmount (void *private_data) {
  * stbuf->st_blocks correctly.
  *
  */
+// For now, assume all paths follow the structure "/<filename>"
 static int vfs_getattr(const char *path, struct stat *stbuf) {
   fprintf(stderr, "vfs_getattr called\n");
 
@@ -106,22 +153,38 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
   stbuf->st_rdev  = 0;
   stbuf->st_blksize = BLOCKSIZE;
 
-  /* 3600: YOU MUST UNCOMMENT BELOW AND IMPLEMENT THIS CORRECTLY */
+  dirent mydirent;
+  char tmp[BLOCKSIZE];
+  memset(tmp, 0, BLOCKSIZE);
+  int hit = 0;
+  for(int i=vcb_g.de_start; i<vcb_g.fat_start; i++) {
+    dread(i, tmp);
+    memcpy(&mydirent, tmp, sizeof(dirent));
+    if(mydirent.valid && strcpy(mydirent.name, path+1) == 0) {
+      hit = 1;
+      break;
+    }
+  }
+  
+  if(!hit)
+    return -ENOENT;
   
   /*
   if (The path represents the root directory)
     stbuf->st_mode  = 0777 | S_IFDIR;
   else 
     stbuf->st_mode  = <<file mode>> | S_IFREG;
-
-  stbuf->st_uid     = // file uid
-  stbuf->st_gid     = // file gid
-  stbuf->st_atime   = // access time 
-  stbuf->st_mtime   = // modify time
-  stbuf->st_ctime   = // create time
-  stbuf->st_size    = // file size
-  stbuf->st_blocks  = // file size in blocks
-    */
+  */
+  // For now, assume only files.
+  stbuf->st_mode    = (mydirent.mode & 0x0000ffff) | S_IFREG;
+  stbuf->st_uid     = mydirent.user; // file uid
+  stbuf->st_gid     = mydirent.group; // file gid
+  stbuf->st_atime   = mydirent.access_time.tv_sec; // access time 
+  stbuf->st_mtime   = mydirent.modify_time.tv_sec; // modify time
+  stbuf->st_ctime   = mydirent.create_time.tv_sec; // create time
+  stbuf->st_size    = mydirent.size; // file size
+  // file size in blocks
+  stbuf->st_blocks  = (mydirent.size + BLOCKSIZE - 1) / BLOCKSIZE;
 
   return 0;
 }
@@ -178,7 +241,8 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
  *
  */
 static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-    return 0;
+  
+  return 0;
 }
 
 /*
