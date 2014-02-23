@@ -1,3 +1,4 @@
+
 /*
  * CS3600, Spring 2014
  * Project 2 Starter Code
@@ -43,9 +44,17 @@
 
 // Global vars
 static vcb vcb_g;
-static dirent *dirent_g[100];
+static dirent dirent_g[100];
+// Array of fatent
 static fatent *fatent_g;
 static int num_of_fatent;
+
+int file_exists(const char *filename);
+int next_free_db();
+int next_free_de();
+int write_fatent(int index);
+int write_dirent(int index);
+int delete_fatent(int index);
 
 /*
  * Initialize filesystem. Read in file system metadata and initialize
@@ -74,7 +83,6 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
   }
   vcb_g = myvcb;
 
-
   // Read dirent blocks into memory (dirent_g)
   int dirent_index = 0;
   for(int i=vcb_g.de_start; i<vcb_g.fat_start; i++) {
@@ -85,7 +93,7 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     dread(i, tmp);
     memcpy(mydirent, tmp, sizeof(dirent));
 
-    dirent_g[dirent_index] = mydirent;
+    dirent_g[dirent_index] = *mydirent;
     dirent_index++;
   }
 
@@ -104,12 +112,11 @@ static void* vfs_mount(struct fuse_conn_info *conn) {
     // Read local fatents into fatent_g.
     for(int j=0; j<128; j++) {
       fatent *thisfatent = (fatent *) malloc(sizeof(fatent));
-      *thisfatent = local[j];
+      memcpy(thisfatent, &local[j], sizeof(fatent));
       fatent_g[fatent_index+j] = *thisfatent;
     }
     fatent_index += 128;
   }
-
   if(!vcb_g.consistent)
     ; //TODO: consistency check/repairs go here
   
@@ -153,15 +160,12 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
   stbuf->st_rdev  = 0;
   stbuf->st_blksize = BLOCKSIZE;
 
-  dirent mydirent;
-  char tmp[BLOCKSIZE];
-  memset(tmp, 0, BLOCKSIZE);
+  dirent hitdirent;
   int hit = 0;
-  for(int i=vcb_g.de_start; i<vcb_g.fat_start; i++) {
-    dread(i, tmp);
-    memcpy(&mydirent, tmp, sizeof(dirent));
-    if(mydirent.valid && strcpy(mydirent.name, path+1) == 0) {
+  for(int i=0; i<vcb_g.de_length; i++) {
+    if(dirent_g[i].valid && strcmp(dirent_g[i].name, path+1) == 0) {
       hit = 1;
+      hitdirent = dirent_g[i];
       break;
     }
   }
@@ -176,15 +180,15 @@ static int vfs_getattr(const char *path, struct stat *stbuf) {
     stbuf->st_mode  = <<file mode>> | S_IFREG;
   */
   // For now, assume only files.
-  stbuf->st_mode    = (mydirent.mode & 0x0000ffff) | S_IFREG;
-  stbuf->st_uid     = mydirent.user; // file uid
-  stbuf->st_gid     = mydirent.group; // file gid
-  stbuf->st_atime   = mydirent.access_time.tv_sec; // access time 
-  stbuf->st_mtime   = mydirent.modify_time.tv_sec; // modify time
-  stbuf->st_ctime   = mydirent.create_time.tv_sec; // create time
-  stbuf->st_size    = mydirent.size; // file size
+  stbuf->st_mode    = (hitdirent.mode & 0x0000ffff) | S_IFREG;
+  stbuf->st_uid     = hitdirent.user; // file uid
+  stbuf->st_gid     = hitdirent.group; // file gid
+  stbuf->st_atime   = hitdirent.access_time.tv_sec; // access time 
+  stbuf->st_mtime   = hitdirent.modify_time.tv_sec; // modify time
+  stbuf->st_ctime   = hitdirent.create_time.tv_sec; // create time
+  stbuf->st_size    = hitdirent.size; // file size
   // file size in blocks
-  stbuf->st_blocks  = (mydirent.size + BLOCKSIZE - 1) / BLOCKSIZE;
+  stbuf->st_blocks  = (hitdirent.size + BLOCKSIZE - 1) / BLOCKSIZE;
 
   return 0;
 }
@@ -231,8 +235,12 @@ static int vfs_mkdir(const char *path, mode_t mode) {
 static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                        off_t offset, struct fuse_file_info *fi)
 {
+  if(strcmp(path, "/"))
+    return -1;
 
-    return 0;
+  
+
+  return 0;
 }
 
 /*
@@ -241,8 +249,45 @@ static int vfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
  *
  */
 static int vfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-  
+  fprintf(stderr, "vfs_create called\n");
+  if(file_exists(path+1))
+    return -EEXIST;
+  int free_db = next_free_db();
+  int free_de = next_free_de();
+  if(free_db == -1 || free_de == -1)
+    return -1;
+
+  fatent new_fatent = {.used=1, .eof=1};
+  fatent_g[free_db] = new_fatent;
+  if(write_fatent(free_db) < 0)
+    return -1;
+
+  struct timespec now;
+  clock_gettime(CLOCK_REALTIME, &now);
+  dirent new_dirent = {.valid=1, .first_block=free_db, .size=1,
+		       .user=geteuid(), .group=getegid(),
+		       .mode=free_de, .access_time=now, .modify_time=now,
+		       .create_time=now};
+  strcpy(new_dirent.name, path+1);
+  dirent_g[free_de] = new_dirent;
+  if(write_dirent(free_de) < 0)
+    return -1;
   return 0;
+}
+
+//Writes out the fatent at fatent_g[index] to disk.
+int write_fatent(int index) {
+  char tmp[BLOCKSIZE];
+  memset(tmp, 0, BLOCKSIZE);
+  memcpy(tmp, fatent_g+(index-(index % 127)), BLOCKSIZE);
+  return dwrite(vcb_g.fat_start+(index/128), tmp);
+}
+
+int write_dirent(int index) {
+  char tmp[BLOCKSIZE];
+  memset(tmp, 0, BLOCKSIZE);
+  memcpy(tmp, dirent_g+index, sizeof(dirent));
+  return dwrite(vcb_g.de_start+index, tmp);
 }
 
 /*
@@ -292,11 +337,42 @@ static int vfs_write(const char *path, const char *buf, size_t size,
  */
 static int vfs_delete(const char *path)
 {
+  for(int i=0; i<vcb_g.de_length; i++) {
+    // Look for corresponding file.
+    if(dirent_g[i].valid && strcmp(dirent_g[i].name, path+1) == 0) {
+      int fatent_index = dirent_g[i].first_block;
+      dirent new = {.valid = 0};
+      dirent_g[i] = new;
+      if(write_dirent(i) < 0)
+	return -1;
 
-  /* 3600: NOTE THAT THE BLOCKS CORRESPONDING TO THE FILE SHOULD BE MARKED
-           AS FREE, AND YOU SHOULD MAKE THEM AVAILABLE TO BE USED WITH OTHER FILES */
+      if(delete_fatent(fatent_index) < 0)
+	return -1;
+      return 0;
+    }
+  }
+  
+  return -1; // Return -1 if file not found.
+}
 
-    return 0;
+// Delete a fatent, all of its linked fatents, and associated data blocks.
+int delete_fatent(int index) {
+  char tmp[BLOCKSIZE];
+  fatent new = {.used = 0};
+  memset(tmp, 0, BLOCKSIZE);
+
+  while(1) {
+    fatent curr = fatent_g[index];
+    fatent_g[index] = new;
+    if(write_fatent(index) < 0 || dwrite(vcb_g.db_start+index, tmp) < 0)
+      return -1;
+
+    if(curr.eof) 
+      return 0;
+    else 
+      index = curr.next;
+  }
+  return -1;
 }
 
 /*
@@ -308,7 +384,7 @@ static int vfs_delete(const char *path)
  */
 static int vfs_rename(const char *from, const char *to)
 {
-
+  
     return 0;
 }
 
@@ -363,6 +439,32 @@ static int vfs_truncate(const char *file, off_t offset)
     return 0;
 }
 
+// Check if file by the name exists.
+int file_exists(const char *filename) {
+  for(int i=0; i<vcb_g.de_length; i++) {
+    if(dirent_g[i].valid && strcmp(dirent_g[i].name, filename) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+// Check if there's an empty spot for dirent.
+int next_free_de() {
+  for(int i=0; i<vcb_g.de_length; i++) {
+    if(dirent_g[i].valid != 1)
+      return i;
+  }
+  return -1;
+}
+
+// Check for next free 
+int next_free_db() {
+  for(int i=0; i<num_of_fatent; i++) {
+    if(fatent_g[i].used != 1)
+      return i;
+  }
+  return -1;
+}
 
 /*
  * You shouldn't mess with this; it sets up FUSE
